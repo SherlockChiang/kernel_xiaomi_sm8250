@@ -37,7 +37,7 @@ static inline unsigned long map_util_freq(unsigned long util,
 
 static inline unsigned long map_util_perf(unsigned long util)
 {
-	return util + (util >> 2);
+	return util + (util / 3);
 }
 #endif /* CONFIG_CPU_FREQ */
 
