@@ -50,6 +50,7 @@ void cam_req_mgr_core_link_reset(struct cam_req_mgr_core_link *link)
 	link->initial_skip = true;
 	link->sof_timestamp = 0;
 	link->prev_sof_timestamp = 0;
+	link->skip_wd_validation = false;
 	link->last_applied_jiffies = 0;
 }
 
@@ -528,6 +529,13 @@ static void __cam_req_mgr_validate_crm_wd_timer(
 	int idx = 0;
 	int next_frame_timeout = 0, current_frame_timeout = 0;
 	struct cam_req_mgr_req_queue *in_q = link->req.in_q;
+
+	if (link->skip_wd_validation) {
+		CAM_DBG(CAM_CRM,
+			"skipping modifying wd timer for first frame after streamon");
+		link->skip_wd_validation = false;
+		return;
+	}
 
 	idx = in_q->rd_idx;
 	__cam_req_mgr_dec_idx(
@@ -1354,83 +1362,7 @@ static int __cam_req_mgr_check_sync_req_is_ready(
 
 	return 0;
 }
- /**
- * __cam_req_mgr_check_peer_req_is_applied()
- *
- * @brief    : Check whether peer req is applied
- * @link     : pointer to link whose input queue and req tbl are
- *             traversed through
- * @idx      : slot idx
- * @return   : true means the req is applied, others not applied
- *
- */
-static bool __cam_req_mgr_check_peer_req_is_applied(
-	struct cam_req_mgr_core_link *link,
-	int32_t idx)
-{
-	bool applied = true;
-	int64_t req_id;
-	int sync_slot_idx = 0;
-	struct cam_req_mgr_core_link *sync_link;
-	struct cam_req_mgr_slot *slot, *sync_slot;
-	struct cam_req_mgr_req_queue *in_q;
 
-	if (idx < 0)
-		return true;
-
-	slot = &link->req.in_q->slot[idx];
-	req_id = slot->req_id;
-	in_q = link->req.in_q;
-
-	CAM_DBG(CAM_REQ,
-		"Check Req[%lld] idx %d req_status %d link_hdl %x is applied in peer link",
-		req_id, idx, slot->status, link->link_hdl);
-
-	if (slot->sync_mode == CAM_REQ_MGR_SYNC_MODE_NO_SYNC) {
-		applied = true;
-		goto end;
-	}
-
-	sync_link = link->sync_link;
-
-	if (!sync_link)
-		applied &= true;
-
-	in_q = sync_link->req.in_q;
-	if (!in_q) {
-		CAM_DBG(CAM_CRM, "Link hdl %x in_q is NULL",
-			sync_link->link_hdl);
-		applied &= true;
-	}
-
-	sync_slot_idx = __cam_req_mgr_find_slot_for_req(
-		sync_link->req.in_q, req_id);
-
-	if ((sync_slot_idx < 0) ||
-		(sync_slot_idx >= MAX_REQ_SLOTS)) {
-		CAM_DBG(CAM_CRM,
-			"Can't find req:%lld from peer link, idx:%d",
-			req_id, sync_slot_idx);
-		applied &= true;
-	}
-
-	sync_slot = &in_q->slot[sync_slot_idx];
-
-	if (sync_slot->status == CRM_SLOT_STATUS_REQ_APPLIED)
-		applied &= true;
-	else
-		applied &= false;
-	CAM_DBG(CAM_CRM,
-		"link:%x idx:%d status:%d applied:%d",
-		sync_link->link_hdl, sync_slot_idx, sync_slot->status, applied);
-
-end:
-	CAM_DBG(CAM_REQ,
-		"Check Req[%lld] idx %d applied:%d",
-		req_id, idx, link->link_hdl, applied);
-
-	return applied;
-}
 /**
  * __cam_req_mgr_process_req()
  *
@@ -1534,21 +1466,9 @@ static int __cam_req_mgr_process_req(struct cam_req_mgr_core_link *link,
 
 			rc = __cam_req_mgr_inject_delay(link->req.l_tbl,
 				slot->idx);
-			if (!rc) {
-				if (in_q->slot[in_q->rd_idx].req_id != -1){
-					rc = __cam_req_mgr_check_peer_req_is_applied(
-						link, in_q->last_applied_idx);
-
-					if (rc)
-						rc = __cam_req_mgr_check_link_is_ready(
-							link, slot->idx, false);
-					else
-						rc = -EINVAL;
-				}
-				else
-					rc = __cam_req_mgr_check_link_is_ready(link,
-						slot->idx, false);
-			}
+			if (!rc)
+				rc = __cam_req_mgr_check_link_is_ready(link,
+					slot->idx, false);
 		}
 
 		if (rc < 0) {
@@ -4063,6 +3983,7 @@ int cam_req_mgr_link_control(struct cam_req_mgr_link_control *control)
 
 	struct cam_req_mgr_connected_device *dev = NULL;
 	struct cam_req_mgr_link_evt_data     evt_data;
+	int                                init_timeout = 0;
 
 	if (!control) {
 		CAM_ERR(CAM_CRM, "Control command is NULL");
@@ -4096,10 +4017,13 @@ int cam_req_mgr_link_control(struct cam_req_mgr_link_control *control)
 			spin_lock_bh(&link->link_state_spin_lock);
 			link->state = CAM_CRM_LINK_STATE_READY;
 			spin_unlock_bh(&link->link_state_spin_lock);
+			if (control->init_timeout[i])
+				link->skip_wd_validation = true;
+			init_timeout = (2 * control->init_timeout[i]);
 			/* Start SOF watchdog timer */
 			rc = crm_timer_init(&link->watchdog,
-				CAM_REQ_MGR_WATCHDOG_TIMEOUT, link,
-				&__cam_req_mgr_sof_freeze);
+				(init_timeout + CAM_REQ_MGR_WATCHDOG_TIMEOUT),
+				link, &__cam_req_mgr_sof_freeze);
 			if (rc < 0) {
 				CAM_ERR(CAM_CRM,
 					"SOF timer start fails: link=0x%x",
@@ -4130,6 +4054,7 @@ int cam_req_mgr_link_control(struct cam_req_mgr_link_control *control)
 			/* Destroy SOF watchdog timer */
 			spin_lock_bh(&link->link_state_spin_lock);
 			link->state = CAM_CRM_LINK_STATE_IDLE;
+			link->skip_wd_validation = false;
 			crm_timer_exit(&link->watchdog);
 			spin_unlock_bh(&link->link_state_spin_lock);
 		} else {

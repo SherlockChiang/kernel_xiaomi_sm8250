@@ -12,9 +12,6 @@ static uint32_t cam_cci_retry(struct cci_device *cci_dev,
 	enum cci_i2c_master_t master,
 	enum cci_i2c_queue_t queue);
 
-static int disable_optmz;
-module_param(disable_optmz, int, 0644);
-
 static int32_t cam_cci_convert_type_to_num_bytes(
 	enum camera_sensor_i2c_type type)
 {
@@ -596,18 +593,12 @@ static int32_t cam_cci_calc_cmd_len(struct cci_device *cci_dev,
 	struct cam_cci_ctrl *c_ctrl, uint32_t cmd_size,
 	 struct cam_sensor_i2c_reg_array *i2c_cmd, uint32_t *pack)
 {
-	// disable I2C writing optimization due to OIS
-#ifndef CONFIG_CAMERA_NONEDXO
 	uint8_t i;
-#endif
 	uint32_t len = 0;
 	uint8_t data_len = 0, addr_len = 0;
 	uint8_t pack_max_len;
 	struct cam_sensor_i2c_reg_setting *msg;
-	// disable I2C writing optimization due to OIS
-#ifndef CONFIG_CAMERA_NONEDXO
 	struct cam_sensor_i2c_reg_array *cmd = i2c_cmd;
-#endif
 	uint32_t size = cmd_size;
 
 	if (!cci_dev || !c_ctrl) {
@@ -629,29 +620,23 @@ static int32_t cam_cci_calc_cmd_len(struct cci_device *cci_dev,
 		len = data_len + addr_len;
 		pack_max_len = size < (cci_dev->payload_size-len) ?
 			size : (cci_dev->payload_size-len);
-#ifndef CONFIG_CAMERA_NONEDXO
-		if ((!c_ctrl->cci_info->disable_optmz) &&
-			(!disable_optmz)) {
-			CAM_DBG(CAM_CCI, "enable writing optimization for 0x%02X", c_ctrl->cci_info->sid<<1);
-			for (i = 0; i < pack_max_len;) {
-				if (cmd->delay || ((cmd - i2c_cmd) >= (cmd_size - 1)))
-					break;
-				if (cmd->reg_addr + 1 ==
-					(cmd+1)->reg_addr) {
-					len += data_len;
-					if (len > cci_dev->payload_size) {
-						len = len - data_len;
-						break;
-					}
-					(*pack)++;
-				} else {
+		for (i = 0; i < pack_max_len;) {
+			if (cmd->delay || ((cmd - i2c_cmd) >= (cmd_size - 1)))
+				break;
+			if (cmd->reg_addr + 1 ==
+				(cmd+1)->reg_addr) {
+				len += data_len;
+				if (len > cci_dev->payload_size) {
+					len = len - data_len;
 					break;
 				}
-				i += data_len;
-				cmd++;
+				(*pack)++;
+			} else {
+				break;
 			}
+			i += data_len;
+			cmd++;
 		}
-#endif
 	}
 
 	if (len > cci_dev->payload_size) {
@@ -1902,15 +1887,7 @@ int32_t cam_cci_core_cfg(struct v4l2_subdev *sd,
 		mutex_unlock(&cci_dev->init_mutex);
 		break;
 	case MSM_CCI_I2C_READ:
-		mutex_lock(&cci_dev->init_mutex);
 		rc = cam_cci_read_bytes(sd, cci_ctrl);
-		if (rc < 0) {
-			CAM_ERR(CAM_CCI, "cam cci err %d , read, slav 0x%x on dev/master %d/%d",
-				rc, cci_ctrl->cci_info->sid << 1,
-				cci_ctrl->cci_info->cci_device,
-				cci_ctrl->cci_info->cci_i2c_master);
-		}
-		mutex_unlock(&cci_dev->init_mutex);
 		break;
 	case MSM_CCI_I2C_WRITE:
 	case MSM_CCI_I2C_WRITE_SEQ:
@@ -1918,16 +1895,7 @@ int32_t cam_cci_core_cfg(struct v4l2_subdev *sd,
 	case MSM_CCI_I2C_WRITE_SYNC:
 	case MSM_CCI_I2C_WRITE_ASYNC:
 	case MSM_CCI_I2C_WRITE_SYNC_BLOCK:
-		mutex_lock(&cci_dev->init_mutex);
 		rc = cam_cci_write(sd, cci_ctrl);
-		if (rc < 0) {
-			CAM_ERR(CAM_CCI, "cam cci err %d , write type %d , slav 0x%x on dev/master %d/%d",
-				rc, cci_ctrl->cmd,
-				cci_ctrl->cci_info->sid << 1,
-				cci_ctrl->cci_info->cci_device,
-				cci_ctrl->cci_info->cci_i2c_master);
-		}
-		mutex_unlock(&cci_dev->init_mutex);
 		break;
 	case MSM_CCI_GPIO_WRITE:
 		break;

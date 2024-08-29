@@ -631,7 +631,14 @@ CONFIG_CRYPTO_POLY1305_NEON=y
 # CONFIG_CRYPTO_AES_ARM64_BS is not set
 # CONFIG_RMNET_PERF is not set
 # CONFIG_RMNET_SHS is not set
-# CONFIG_OSSFOD is not set
+# CONFIG_OSSFOD is not setxx
+
+#
+# Camera packages
+#
+CONFIG_TECHPACK_CAMERA_XIAOMI=y
+# CONFIG_TECHPACK_CAMERA_XIAOMI_CAS is not set
+# CONFIG_TECHPACK_CAMERA_XIAOMI_TABLET is not set
 
 #
 # General architecture-dependent options
