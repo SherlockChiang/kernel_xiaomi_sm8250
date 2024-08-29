@@ -633,6 +633,13 @@ CONFIG_CRYPTO_POLY1305_NEON=y
 # CONFIG_OSSFOD is not set
 
 #
+# Camera packages
+#
+CONFIG_TECHPACK_CAMERA_XIAOMI=y
+# CONFIG_TECHPACK_CAMERA_XIAOMI_CAS is not set
+# CONFIG_TECHPACK_CAMERA_XIAOMI_TABLET is not set
+
+#
 # General architecture-dependent options
 #
 CONFIG_JUMP_LABEL=y
