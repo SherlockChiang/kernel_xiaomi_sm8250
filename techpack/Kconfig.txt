@@ -1,0 +1,13 @@
+menu "Xiaomi Camera Configuration"
+
+config CAMERA_NONEDXO
+	bool "Enable None-DXO Camera modifications"
+	help
+	  "Enable None-DXO Camera modifications"
+
+config CAMERA_CAS
+	bool "Enable Xiaomi CAS Camera modifications"
+	help
+	  "Enable Xiaomi CAS Camera modifications"
+
+endmenu
